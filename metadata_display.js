@@ -23,20 +23,16 @@ app.registerExtension({
             
             const textWidget = result.widget;
             textWidget.inputEl.readOnly = true;
-            textWidget.inputEl.style.height = "300px";
+            textWidget.inputEl.style.height = "320px";
             textWidget.inputEl.style.fontSize = "12px";
-            textWidget.inputEl.placeholder = "Awaiting image selection...";
+            textWidget.inputEl.placeholder = "Awaiting image...";
 
-            // Reorder so text is at the bottom
+            // Place text widget at the bottom
             this.widgets = this.widgets.filter(w => w !== textWidget);
             this.widgets.push(textWidget);
 
             const triggerFetch = () => {
-                if (!imageWidget.value) {
-                    textWidget.value = "No image selected.";
-                    if (textWidget.inputEl) textWidget.inputEl.value = "No image selected.";
-                    return;
-                }
+                if (!imageWidget.value) return;
                 api.fetchApi("/pnginfo/fetch_metadata", {
                     method: "POST",
                     body: JSON.stringify({ 
@@ -52,7 +48,7 @@ app.registerExtension({
                 triggerFetch();
             };
 
-            this.size = [500, 580];
+            this.size = [500, 600];
             setTimeout(triggerFetch, 200);
         };
 

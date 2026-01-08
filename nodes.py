@@ -27,11 +27,21 @@ class pnginfo:
     OUTPUT_NODE = True
 
     def extract(self, image=None):
-        # Graceful failure if image is None or empty
-        if image is None or image == "":
+        if not image:
             return {"ui": {"text": ["No image selected."]}, "result": ("No image selected.",)}
             
+        # 1. Get the metadata first
         text = self.get_metadata(image)
+        
+        # 2. Attempt to delete the file from the input folder (Self-Cleaning)
+        try:
+            full_path = folder_paths.get_annotated_filepath(image)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+        except Exception:
+            # Fail silently if deletion fails (e.g. file locked or already gone)
+            pass
+                
         return {"ui": {"text": [text]}, "result": (text,)}
 
     def get_metadata(self, image):
@@ -41,10 +51,10 @@ class pnginfo:
         try:
             full_path = folder_paths.get_annotated_filepath(image)
         except Exception:
-            return f"Invalid path: {image}"
+            return f"Invalid path reference: {image}"
 
         if not os.path.exists(full_path):
-            return "File not found. It may have been deleted or moved."
+            return "Image not found on disk (it may have been cleaned already)."
 
         try:
             img = Image.open(full_path)
@@ -64,9 +74,9 @@ class pnginfo:
                     return self._parse_comfy_json(data)
                 except:
                     return raw
-            return "No metadata found in this image."
+            return "No metadata found."
         except Exception as e:
-            return f"Error reading file: {str(e)}"
+            return f"Error reading metadata: {str(e)}"
 
     def _parse_comfy_json(self, data):
         prompts = []
@@ -75,7 +85,6 @@ class pnginfo:
         seed = steps = cfg = scheduler = sampler = "?"
         width = height = "?"
 
-        # Handle both raw prompt dicts and full workflow exports
         nodes = data if "class_type" in str(data) else data.get("prompt", data)
 
         for node_id, node in nodes.items():
@@ -86,22 +95,18 @@ class pnginfo:
                 text = inputs.get("text", "")
                 if text and text.strip():
                     prompts.append(text.strip())
-
             elif "Sampler" in ctype:
                 seed = inputs.get("seed") or inputs.get("noise_seed") or seed
                 steps = inputs.get("steps", steps)
                 cfg = inputs.get("cfg", cfg)
                 sampler = inputs.get("sampler_name", sampler)
                 scheduler = inputs.get("scheduler", scheduler)
-
             elif "CheckpointLoader" in ctype:
                 models.append(os.path.basename(str(inputs.get("ckpt_name", ""))))
-            
             elif "LoraLoader" in ctype:
                 l_name = os.path.basename(str(inputs.get("lora_name", "")))
                 l_strength = inputs.get("strength_model", "1.0")
                 loras.append(f"{l_name} ({l_strength})")
-
             elif ctype in ["EmptyLatentImage", "EmptyImage", "UpscaleLatent", "UpscaleImage"]:
                 width = inputs.get("width", width)
                 height = inputs.get("height", height)
@@ -110,7 +115,6 @@ class pnginfo:
         if models: output.append(f"📦 Model: {', '.join(models)}")
         
         for i, p in enumerate(prompts):
-            # Basic logic to guess positive/negative
             label = "✅ Positive" if i == 0 else f"❌ Negative ({i})"
             low_p = p.lower()
             if any(x in low_p[:30] for x in ["bad", "embedding:", "worst", "low quality"]):
