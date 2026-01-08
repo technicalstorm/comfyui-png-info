@@ -11,7 +11,7 @@ from aiohttp import web
 # but for maximum simplicity, you can keep the .js in the same folder as nodes.py.
 WEB_DIRECTORY = "."
 
-class MetadataDisplay:
+class PNGInfo:
     @classmethod
     def INPUT_TYPES(cls):
         input_dir = folder_paths.get_input_directory()
@@ -78,9 +78,9 @@ async def fetch_metadata_api(request):
     data = await request.json()
     image_name = data.get("image")
     node_id = data.get("node_id")
-    instance = MetadataDisplay()
+    instance = PNGInfo()
     text = instance.get_metadata(image_name)
     PromptServer.instance.send_sync("wlsh-metadata-update", {"node_id": node_id, "text": text})
     return web.Response(status=200)
 
-PNGInfo
+NODE_CLASS_MAPPINGS = {"PNGInfo": PNGInfo}

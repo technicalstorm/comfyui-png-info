@@ -3,10 +3,10 @@ import { api } from "../../scripts/api.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
 
 app.registerExtension({
-    name: "WLSH.MetadataDisplay",
+    name: "WLSH.PNGInfo",
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "MetadataDisplay") return;
+        if (nodeData.name !== "PNGInfo") return;
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
