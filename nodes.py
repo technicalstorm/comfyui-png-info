@@ -12,11 +12,12 @@ WEB_DIRECTORY = "."
 class pnginfo:
     @classmethod
     def INPUT_TYPES(cls):
-        input_dir = folder_paths.get_input_directory()
-        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
         return {
             "required": {
-                "image": (sorted(files), {"image_upload": True}),
+                # We use a simple list here. Using 'image_upload' in the JS 
+                # will still allow drag-and-drop, but this stops the 'Red Node' 
+                # validation error because we aren't using the strict Image type.
+                "image": ([], {}), 
             }
         }
 
@@ -27,34 +28,24 @@ class pnginfo:
     OUTPUT_NODE = True
 
     def extract(self, image=None):
+        # Fail gracefully without turning the node red
         if not image:
             return {"ui": {"text": ["No image selected."]}, "result": ("No image selected.",)}
-            
-        # 1. Get the metadata first
-        text = self.get_metadata(image)
         
-        # 2. Attempt to delete the file from the input folder (Self-Cleaning)
-        try:
-            full_path = folder_paths.get_annotated_filepath(image)
-            if os.path.exists(full_path):
-                os.remove(full_path)
-        except Exception:
-            # Fail silently if deletion fails (e.g. file locked or already gone)
-            pass
-                
+        text = self.get_metadata(image)
         return {"ui": {"text": [text]}, "result": (text,)}
 
-    def get_metadata(self, image):
+    def get_metadata(self, image, delete_after=False):
         if not image:
             return "No image selected."
             
-        try:
-            full_path = folder_paths.get_annotated_filepath(image)
-        except Exception:
-            return f"Invalid path reference: {image}"
+        # Manually find the path since we bypassed the automatic validation
+        # Check input directory
+        input_dir = folder_paths.get_input_directory()
+        full_path = os.path.join(input_dir, image)
 
         if not os.path.exists(full_path):
-            return "Image not found on disk (it may have been cleaned already)."
+            return "File already processed and removed from input folder."
 
         try:
             img = Image.open(full_path)
@@ -68,82 +59,60 @@ class pnginfo:
                     uc = exif_dict.get("Exif", {}).get(piexif.ExifIFD.UserComment)
                     if uc: raw = piexif.helper.UserComment.load(uc)
             
-            if raw:
+            result_text = self._parse_metadata(raw) if raw else "No metadata found."
+
+            if delete_after:
+                img.close()
                 try:
-                    data = json.loads(raw)
-                    return self._parse_comfy_json(data)
-                except:
-                    return raw
-            return "No metadata found."
+                    os.remove(full_path)
+                except Exception as e:
+                    print(f"[pnginfo] Cleanup failed: {e}")
+
+            return result_text
         except Exception as e:
-            return f"Error reading metadata: {str(e)}"
+            return f"Error: {str(e)}"
 
-    def _parse_comfy_json(self, data):
-        prompts = []
-        loras = []
-        models = []
-        seed = steps = cfg = scheduler = sampler = "?"
-        width = height = "?"
+    def _parse_metadata(self, raw):
+        try:
+            data = json.loads(raw)
+            prompts = []
+            seed = steps = cfg = sampler = scheduler = "?"
+            width = height = "?"
+            
+            nodes = data if "class_type" in str(data) else data.get("prompt", data)
+            for node in nodes.values():
+                ctype = node.get("class_type", "")
+                inputs = node.get("inputs", {})
+                if "CLIPTextEncode" in ctype:
+                    txt = inputs.get("text", "")
+                    if txt: prompts.append(txt)
+                elif "Sampler" in ctype:
+                    seed = inputs.get("seed") or inputs.get("noise_seed") or seed
+                    steps = inputs.get("steps", steps)
+                    cfg = inputs.get("cfg", cfg)
+                    sampler = inputs.get("sampler_name", sampler)
+                    scheduler = inputs.get("scheduler", scheduler)
+                elif ctype in ["EmptyLatentImage", "EmptyImage"]:
+                    width, height = inputs.get("width", width), inputs.get("height", height)
 
-        nodes = data if "class_type" in str(data) else data.get("prompt", data)
-
-        for node_id, node in nodes.items():
-            ctype = node.get("class_type", "")
-            inputs = node.get("inputs", {})
-
-            if "CLIPTextEncode" in ctype:
-                text = inputs.get("text", "")
-                if text and text.strip():
-                    prompts.append(text.strip())
-            elif "Sampler" in ctype:
-                seed = inputs.get("seed") or inputs.get("noise_seed") or seed
-                steps = inputs.get("steps", steps)
-                cfg = inputs.get("cfg", cfg)
-                sampler = inputs.get("sampler_name", sampler)
-                scheduler = inputs.get("scheduler", scheduler)
-            elif "CheckpointLoader" in ctype:
-                models.append(os.path.basename(str(inputs.get("ckpt_name", ""))))
-            elif "LoraLoader" in ctype:
-                l_name = os.path.basename(str(inputs.get("lora_name", "")))
-                l_strength = inputs.get("strength_model", "1.0")
-                loras.append(f"{l_name} ({l_strength})")
-            elif ctype in ["EmptyLatentImage", "EmptyImage", "UpscaleLatent", "UpscaleImage"]:
-                width = inputs.get("width", width)
-                height = inputs.get("height", height)
-
-        output = []
-        if models: output.append(f"📦 Model: {', '.join(models)}")
-        
-        for i, p in enumerate(prompts):
-            label = "✅ Positive" if i == 0 else f"❌ Negative ({i})"
-            low_p = p.lower()
-            if any(x in low_p[:30] for x in ["bad", "embedding:", "worst", "low quality"]):
-                label = "❌ Negative"
-            output.append(f"{label}: {p}")
-
-        if loras: output.append(f"🎨 LoRAs: {', '.join(loras)}")
-        
-        output.append("-" * 30)
-        output.append(f"⚙️ Resolution: {width} x {height}")
-        output.append(f"🎲 Seed: {seed}")
-        output.append(f"🚀 Steps: {steps} | CFG: {cfg}")
-        output.append(f"⏲ Sampler: {sampler} | Scheduler: {scheduler}")
-        
-        return "\n\n".join(output)
+            output = []
+            for i, p in enumerate(prompts):
+                label = "❌ Negative" if any(x in p.lower()[:30] for x in ["bad", "lowres", "text"]) else "✅ Positive"
+                output.append(f"{label}: {p}")
+            output.append("-" * 30)
+            output.append(f"⚙️ {width}x{height} | Seed: {seed} | Steps: {steps} | CFG: {cfg} | {sampler}/{scheduler}")
+            return "\n\n".join(output)
+        except:
+            return raw
 
 @PromptServer.instance.routes.post("/pnginfo/fetch_metadata")
 async def fetch_metadata_api(request):
-    try:
-        data = await request.json()
-        image_name = data.get("image")
-        node_id = data.get("node_id")
-        
-        instance = pnginfo()
-        text = instance.get_metadata(image_name)
-        
-        PromptServer.instance.send_sync("pnginfo-metadata-update", {"node_id": node_id, "text": text})
-        return web.Response(status=200)
-    except Exception as e:
-        return web.Response(status=500, text=str(e))
+    data = await request.json()
+    image_name = data.get("image")
+    node_id = data.get("node_id")
+    instance = pnginfo()
+    text = instance.get_metadata(image_name, delete_after=True)
+    PromptServer.instance.send_sync("pnginfo-metadata-update", {"node_id": node_id, "text": text})
+    return web.Response(status=200)
 
 NODE_CLASS_MAPPINGS = {"pnginfo": pnginfo}

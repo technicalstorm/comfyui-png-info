@@ -12,54 +12,34 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
 
+            // Re-enable the upload behavior manually on our empty widget
             const imageWidget = this.widgets.find(w => w.name === "image");
+            imageWidget.type = "combo";
+            imageWidget.options = { values: [], image_upload: true };
 
             const result = ComfyWidgets.STRING(
                 this,
                 "metadata",
                 ["STRING", { multiline: true }],
                 app
-            );
+            ).widget;
             
-            const textWidget = result.widget;
-            textWidget.inputEl.readOnly = true;
-            textWidget.inputEl.style.height = "320px";
-            textWidget.inputEl.style.fontSize = "12px";
-            textWidget.inputEl.placeholder = "Awaiting image...";
+            result.inputEl.readOnly = true;
+            result.inputEl.style.height = "320px";
+            result.inputEl.placeholder = "Drop image... it will be deleted immediately after reading.";
 
-            // Place text widget at the bottom
-            this.widgets = this.widgets.filter(w => w !== textWidget);
-            this.widgets.push(textWidget);
+            this.widgets = this.widgets.filter(w => w !== result);
+            this.widgets.push(result);
 
-            const triggerFetch = () => {
+            imageWidget.callback = () => {
                 if (!imageWidget.value) return;
                 api.fetchApi("/pnginfo/fetch_metadata", {
                     method: "POST",
-                    body: JSON.stringify({ 
-                        image: imageWidget.value,
-                        node_id: this.id 
-                    }),
+                    body: JSON.stringify({ image: imageWidget.value, node_id: this.id }),
                 });
             };
 
-            const cb = imageWidget.callback;
-            imageWidget.callback = function () {
-                cb?.apply(this, arguments);
-                triggerFetch();
-            };
-
             this.size = [500, 600];
-            setTimeout(triggerFetch, 200);
-        };
-
-        const onExecuted = nodeType.prototype.onExecuted;
-        nodeType.prototype.onExecuted = function (message) {
-            onExecuted?.apply(this, arguments);
-            const widget = this.widgets.find(w => w.name === "metadata");
-            if (widget && message?.text) {
-                widget.value = message.text[0];
-                if (widget.inputEl) widget.inputEl.value = message.text[0];
-            }
         };
     },
 
