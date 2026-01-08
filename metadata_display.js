@@ -27,11 +27,16 @@ app.registerExtension({
             textWidget.inputEl.style.fontSize = "12px";
             textWidget.inputEl.placeholder = "Awaiting image selection...";
 
+            // Reorder so text is at the bottom
             this.widgets = this.widgets.filter(w => w !== textWidget);
             this.widgets.push(textWidget);
 
             const triggerFetch = () => {
-                if (!imageWidget.value) return;
+                if (!imageWidget.value) {
+                    textWidget.value = "No image selected.";
+                    if (textWidget.inputEl) textWidget.inputEl.value = "No image selected.";
+                    return;
+                }
                 api.fetchApi("/pnginfo/fetch_metadata", {
                     method: "POST",
                     body: JSON.stringify({ 

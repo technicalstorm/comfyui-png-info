@@ -26,14 +26,26 @@ class pnginfo:
     CATEGORY = "pnginfo"
     OUTPUT_NODE = True
 
-    def extract(self, image):
+    def extract(self, image=None):
+        # Graceful failure if image is None or empty
+        if image is None or image == "":
+            return {"ui": {"text": ["No image selected."]}, "result": ("No image selected.",)}
+            
         text = self.get_metadata(image)
         return {"ui": {"text": [text]}, "result": (text,)}
 
     def get_metadata(self, image):
-        full_path = folder_paths.get_annotated_filepath(image)
+        if not image:
+            return "No image selected."
+            
+        try:
+            full_path = folder_paths.get_annotated_filepath(image)
+        except Exception:
+            return f"Invalid path: {image}"
+
         if not os.path.exists(full_path):
-            return "File not found."
+            return "File not found. It may have been deleted or moved."
+
         try:
             img = Image.open(full_path)
             raw = ""
@@ -52,9 +64,9 @@ class pnginfo:
                     return self._parse_comfy_json(data)
                 except:
                     return raw
-            return "No metadata found."
+            return "No metadata found in this image."
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error reading file: {str(e)}"
 
     def _parse_comfy_json(self, data):
         prompts = []
@@ -63,16 +75,16 @@ class pnginfo:
         seed = steps = cfg = scheduler = sampler = "?"
         width = height = "?"
 
+        # Handle both raw prompt dicts and full workflow exports
         nodes = data if "class_type" in str(data) else data.get("prompt", data)
 
         for node_id, node in nodes.items():
             ctype = node.get("class_type", "")
             inputs = node.get("inputs", {})
 
-            # Improved Prompt Extraction
             if "CLIPTextEncode" in ctype:
                 text = inputs.get("text", "")
-                if text.strip():
+                if text and text.strip():
                     prompts.append(text.strip())
 
             elif "Sampler" in ctype:
@@ -97,10 +109,11 @@ class pnginfo:
         output = []
         if models: output.append(f"📦 Model: {', '.join(models)}")
         
-        # Display all found prompts
         for i, p in enumerate(prompts):
+            # Basic logic to guess positive/negative
             label = "✅ Positive" if i == 0 else f"❌ Negative ({i})"
-            if "bad" in p.lower()[:30] or "embedding:" in p.lower():
+            low_p = p.lower()
+            if any(x in low_p[:30] for x in ["bad", "embedding:", "worst", "low quality"]):
                 label = "❌ Negative"
             output.append(f"{label}: {p}")
 
@@ -116,12 +129,17 @@ class pnginfo:
 
 @PromptServer.instance.routes.post("/pnginfo/fetch_metadata")
 async def fetch_metadata_api(request):
-    data = await request.json()
-    image_name = data.get("image")
-    node_id = data.get("node_id")
-    instance = pnginfo()
-    text = instance.get_metadata(image_name)
-    PromptServer.instance.send_sync("pnginfo-metadata-update", {"node_id": node_id, "text": text})
-    return web.Response(status=200)
+    try:
+        data = await request.json()
+        image_name = data.get("image")
+        node_id = data.get("node_id")
+        
+        instance = pnginfo()
+        text = instance.get_metadata(image_name)
+        
+        PromptServer.instance.send_sync("pnginfo-metadata-update", {"node_id": node_id, "text": text})
+        return web.Response(status=200)
+    except Exception as e:
+        return web.Response(status=500, text=str(e))
 
 NODE_CLASS_MAPPINGS = {"pnginfo": pnginfo}
