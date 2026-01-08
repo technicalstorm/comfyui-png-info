@@ -110,11 +110,11 @@ class pnginfo:
                 height = inputs.get("height", height)
 
         output = []
-        if models: output.append(f"📦 Model: {models[0]}")
         for i, p in enumerate(prompts):
             label = "✅ Positive" if i == 0 else "❌ Negative"
             if any(x in p.lower()[:30] for x in ["bad", "embedding:", "worst"]): label = "❌ Negative"
             output.append(f"{label}: {p}")
+        if models: output.append(f"📦 Model: {models[0]}")
         if loras: output.append(f"🎨 LoRAs: {', '.join(loras)}")
         output.append("-" * 30)
         output.append(f"⚙️ {width}x{height} | Seed: {seed} | Steps: {steps} | CFG: {cfg}")
