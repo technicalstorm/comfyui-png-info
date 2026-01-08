@@ -12,10 +12,8 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
 
-            // The 'image' widget is already created by Comfy because it's in INPUT_TYPES
             const imageWidget = this.widgets.find(w => w.name === "image");
 
-            // Create the metadata widget
             const result = ComfyWidgets.STRING(
                 this,
                 "metadata",
@@ -25,10 +23,10 @@ app.registerExtension({
             
             const textWidget = result.widget;
             textWidget.inputEl.readOnly = true;
-            textWidget.inputEl.placeholder = "Metadata will appear here...";
+            textWidget.inputEl.style.height = "300px";
+            textWidget.inputEl.style.fontSize = "12px";
+            textWidget.inputEl.placeholder = "Awaiting image selection...";
 
-            // RE-ORDER: Ensure the text widget is at the very bottom of the widget list
-            // This places the image preview and image dropdown above it.
             this.widgets = this.widgets.filter(w => w !== textWidget);
             this.widgets.push(textWidget);
 
@@ -43,18 +41,16 @@ app.registerExtension({
                 });
             };
 
-            // Auto-fetch on change
             const cb = imageWidget.callback;
             imageWidget.callback = function () {
                 cb?.apply(this, arguments);
                 triggerFetch();
             };
 
-            this.size = [450, 450];
-            setTimeout(triggerFetch, 100);
+            this.size = [500, 580];
+            setTimeout(triggerFetch, 200);
         };
 
-        // Standard execution update
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             onExecuted?.apply(this, arguments);

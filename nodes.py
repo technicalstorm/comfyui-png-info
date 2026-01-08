@@ -7,8 +7,6 @@ import piexif.helper
 from server import PromptServer
 from aiohttp import web
 
-# We point this to the current directory so ComfyUI finds a .js file if we put one there,
-# but for maximum simplicity, you can keep the .js in the same folder as nodes.py.
 WEB_DIRECTORY = "."
 
 class pnginfo:
@@ -50,7 +48,8 @@ class pnginfo:
             
             if raw:
                 try:
-                    return self._parse_comfy_json(json.loads(raw))
+                    data = json.loads(raw)
+                    return self._parse_comfy_json(data)
                 except:
                     return raw
             return "No metadata found."
@@ -58,20 +57,62 @@ class pnginfo:
             return f"Error: {str(e)}"
 
     def _parse_comfy_json(self, data):
-        positive = ""
-        negative = ""
+        prompts = []
         loras = []
-        for node in data.values():
+        models = []
+        seed = steps = cfg = scheduler = sampler = "?"
+        width = height = "?"
+
+        nodes = data if "class_type" in str(data) else data.get("prompt", data)
+
+        for node_id, node in nodes.items():
             ctype = node.get("class_type", "")
             inputs = node.get("inputs", {})
+
+            # Improved Prompt Extraction
             if "CLIPTextEncode" in ctype:
-                txt = inputs.get("text", "")
-                if not positive: positive = txt
-                else: negative = txt
+                text = inputs.get("text", "")
+                if text.strip():
+                    prompts.append(text.strip())
+
+            elif "Sampler" in ctype:
+                seed = inputs.get("seed") or inputs.get("noise_seed") or seed
+                steps = inputs.get("steps", steps)
+                cfg = inputs.get("cfg", cfg)
+                sampler = inputs.get("sampler_name", sampler)
+                scheduler = inputs.get("scheduler", scheduler)
+
+            elif "CheckpointLoader" in ctype:
+                models.append(os.path.basename(str(inputs.get("ckpt_name", ""))))
+            
             elif "LoraLoader" in ctype:
-                loras.append(os.path.basename(str(inputs.get("lora_name", ""))))
+                l_name = os.path.basename(str(inputs.get("lora_name", "")))
+                l_strength = inputs.get("strength_model", "1.0")
+                loras.append(f"{l_name} ({l_strength})")
+
+            elif ctype in ["EmptyLatentImage", "EmptyImage", "UpscaleLatent", "UpscaleImage"]:
+                width = inputs.get("width", width)
+                height = inputs.get("height", height)
+
+        output = []
+        if models: output.append(f"📦 Model: {', '.join(models)}")
         
-        return f"PROMPT: {positive}\n\nNEGATIVE: {negative}\n\nLORAS: {', '.join(loras)}"
+        # Display all found prompts
+        for i, p in enumerate(prompts):
+            label = "✅ Positive" if i == 0 else f"❌ Negative ({i})"
+            if "bad" in p.lower()[:30] or "embedding:" in p.lower():
+                label = "❌ Negative"
+            output.append(f"{label}: {p}")
+
+        if loras: output.append(f"🎨 LoRAs: {', '.join(loras)}")
+        
+        output.append("-" * 30)
+        output.append(f"⚙️ Resolution: {width} x {height}")
+        output.append(f"🎲 Seed: {seed}")
+        output.append(f"🚀 Steps: {steps} | CFG: {cfg}")
+        output.append(f"⏲ Sampler: {sampler} | Scheduler: {scheduler}")
+        
+        return "\n\n".join(output)
 
 @PromptServer.instance.routes.post("/pnginfo/fetch_metadata")
 async def fetch_metadata_api(request):
