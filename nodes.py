@@ -12,12 +12,11 @@ WEB_DIRECTORY = "."
 class pnginfo:
     @classmethod
     def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
         return {
             "required": {
-                # We use a simple list here. Using 'image_upload' in the JS 
-                # will still allow drag-and-drop, but this stops the 'Red Node' 
-                # validation error because we aren't using the strict Image type.
-                "image": ([], {}), 
+                "image": (sorted(files), {"image_upload": True}),
             }
         }
 
@@ -28,10 +27,8 @@ class pnginfo:
     OUTPUT_NODE = True
 
     def extract(self, image=None):
-        # Fail gracefully without turning the node red
-        if not image:
-            return {"ui": {"text": ["No image selected."]}, "result": ("No image selected.",)}
-        
+        # We still keep this for standard Comfy runs, but it will 
+        # usually find the file already gone if triggered by on_change.
         text = self.get_metadata(image)
         return {"ui": {"text": [text]}, "result": (text,)}
 
@@ -39,13 +36,13 @@ class pnginfo:
         if not image:
             return "No image selected."
             
-        # Manually find the path since we bypassed the automatic validation
-        # Check input directory
-        input_dir = folder_paths.get_input_directory()
-        full_path = os.path.join(input_dir, image)
+        try:
+            full_path = folder_paths.get_annotated_filepath(image)
+        except Exception:
+            return f"Invalid path: {image}"
 
         if not os.path.exists(full_path):
-            return "File already processed and removed from input folder."
+            return "File already processed and removed."
 
         try:
             img = Image.open(full_path)
@@ -59,59 +56,80 @@ class pnginfo:
                     uc = exif_dict.get("Exif", {}).get(piexif.ExifIFD.UserComment)
                     if uc: raw = piexif.helper.UserComment.load(uc)
             
-            result_text = self._parse_metadata(raw) if raw else "No metadata found."
+            # Parse the data
+            result_text = ""
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    result_text = self._parse_comfy_json(data)
+                except:
+                    result_text = raw
+            else:
+                result_text = "No metadata found."
 
+            # DELETE ON CHANGE LOGIC:
             if delete_after:
-                img.close()
+                img.close() # Ensure file handle is released before deletion
                 try:
                     os.remove(full_path)
                 except Exception as e:
                     print(f"[pnginfo] Cleanup failed: {e}")
 
             return result_text
+
         except Exception as e:
             return f"Error: {str(e)}"
 
-    def _parse_metadata(self, raw):
-        try:
-            data = json.loads(raw)
-            prompts = []
-            seed = steps = cfg = sampler = scheduler = "?"
-            width = height = "?"
-            
-            nodes = data if "class_type" in str(data) else data.get("prompt", data)
-            for node in nodes.values():
-                ctype = node.get("class_type", "")
-                inputs = node.get("inputs", {})
-                if "CLIPTextEncode" in ctype:
-                    txt = inputs.get("text", "")
-                    if txt: prompts.append(txt)
-                elif "Sampler" in ctype:
-                    seed = inputs.get("seed") or inputs.get("noise_seed") or seed
-                    steps = inputs.get("steps", steps)
-                    cfg = inputs.get("cfg", cfg)
-                    sampler = inputs.get("sampler_name", sampler)
-                    scheduler = inputs.get("scheduler", scheduler)
-                elif ctype in ["EmptyLatentImage", "EmptyImage"]:
-                    width, height = inputs.get("width", width), inputs.get("height", height)
+    def _parse_comfy_json(self, data):
+        prompts = []
+        loras = []
+        models = []
+        seed = steps = cfg = scheduler = sampler = "?"
+        width = height = "?"
+        nodes = data if "class_type" in str(data) else data.get("prompt", data)
 
-            output = []
-            for i, p in enumerate(prompts):
-                label = "❌ Negative" if any(x in p.lower()[:30] for x in ["bad", "lowres", "text"]) else "✅ Positive"
-                output.append(f"{label}: {p}")
-            output.append("-" * 30)
-            output.append(f"⚙️ {width}x{height} | Seed: {seed} | Steps: {steps} | CFG: {cfg} | {sampler}/{scheduler}")
-            return "\n\n".join(output)
-        except:
-            return raw
+        for node_id, node in nodes.items():
+            ctype = node.get("class_type", "")
+            inputs = node.get("inputs", {})
+            if "CLIPTextEncode" in ctype:
+                text = inputs.get("text", "")
+                if text and text.strip(): prompts.append(text.strip())
+            elif "Sampler" in ctype:
+                seed = inputs.get("seed") or inputs.get("noise_seed") or seed
+                steps = inputs.get("steps", steps)
+                cfg = inputs.get("cfg", cfg)
+                sampler = inputs.get("sampler_name", sampler)
+                scheduler = inputs.get("scheduler", scheduler)
+            elif "CheckpointLoader" in ctype:
+                models.append(os.path.basename(str(inputs.get("ckpt_name", ""))))
+            elif "LoraLoader" in ctype:
+                l_name = os.path.basename(str(inputs.get("lora_name", "")))
+                loras.append(l_name)
+            elif ctype in ["EmptyLatentImage", "EmptyImage"]:
+                width = inputs.get("width", width)
+                height = inputs.get("height", height)
+
+        output = []
+        if models: output.append(f"📦 Model: {models[0]}")
+        for i, p in enumerate(prompts):
+            label = "✅ Positive" if i == 0 else "❌ Negative"
+            if any(x in p.lower()[:30] for x in ["bad", "embedding:", "worst"]): label = "❌ Negative"
+            output.append(f"{label}: {p}")
+        if loras: output.append(f"🎨 LoRAs: {', '.join(loras)}")
+        output.append("-" * 30)
+        output.append(f"⚙️ {width}x{height} | Seed: {seed} | Steps: {steps} | CFG: {cfg}")
+        return "\n\n".join(output)
 
 @PromptServer.instance.routes.post("/pnginfo/fetch_metadata")
 async def fetch_metadata_api(request):
     data = await request.json()
     image_name = data.get("image")
     node_id = data.get("node_id")
+    
     instance = pnginfo()
+    # Pass True to trigger the immediate deletion
     text = instance.get_metadata(image_name, delete_after=True)
+    
     PromptServer.instance.send_sync("pnginfo-metadata-update", {"node_id": node_id, "text": text})
     return web.Response(status=200)
 
