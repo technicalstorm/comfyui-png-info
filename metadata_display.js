@@ -3,10 +3,10 @@ import { api } from "../../scripts/api.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
 
 app.registerExtension({
-    name: "WLSH.PNGInfo",
+    name: "pnginfo",
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "PNGInfo") return;
+        if (nodeData.name !== "pnginfo") return;
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
@@ -34,7 +34,7 @@ app.registerExtension({
 
             const triggerFetch = () => {
                 if (!imageWidget.value) return;
-                api.fetchApi("/wlsh/fetch_metadata", {
+                api.fetchApi("/pnginfo/fetch_metadata", {
                     method: "POST",
                     body: JSON.stringify({ 
                         image: imageWidget.value,
@@ -67,7 +67,7 @@ app.registerExtension({
     },
 
     async setup() {
-        api.addEventListener("wlsh-metadata-update", (event) => {
+        api.addEventListener("pnginfo-metadata-update", (event) => {
             const { node_id, text } = event.detail;
             const node = app.graph.getNodeById(node_id);
             if (node) {

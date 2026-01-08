@@ -11,7 +11,7 @@ from aiohttp import web
 # but for maximum simplicity, you can keep the .js in the same folder as nodes.py.
 WEB_DIRECTORY = "."
 
-class PNGInfo:
+class pnginfo:
     @classmethod
     def INPUT_TYPES(cls):
         input_dir = folder_paths.get_input_directory()
@@ -25,7 +25,7 @@ class PNGInfo:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "extract"
-    CATEGORY = "WLSH Nodes"
+    CATEGORY = "pnginfo"
     OUTPUT_NODE = True
 
     def extract(self, image):
@@ -73,14 +73,14 @@ class PNGInfo:
         
         return f"PROMPT: {positive}\n\nNEGATIVE: {negative}\n\nLORAS: {', '.join(loras)}"
 
-@PromptServer.instance.routes.post("/wlsh/fetch_metadata")
+@PromptServer.instance.routes.post("/pnginfo/fetch_metadata")
 async def fetch_metadata_api(request):
     data = await request.json()
     image_name = data.get("image")
     node_id = data.get("node_id")
-    instance = PNGInfo()
+    instance = pnginfo()
     text = instance.get_metadata(image_name)
-    PromptServer.instance.send_sync("wlsh-metadata-update", {"node_id": node_id, "text": text})
+    PromptServer.instance.send_sync("pnginfo-metadata-update", {"node_id": node_id, "text": text})
     return web.Response(status=200)
 
-NODE_CLASS_MAPPINGS = {"PNGInfo": PNGInfo}
+NODE_CLASS_MAPPINGS = {"pnginfo": pnginfo}

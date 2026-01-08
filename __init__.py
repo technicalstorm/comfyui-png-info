@@ -1,5 +1,5 @@
 from .nodes import NODE_CLASS_MAPPINGS, WEB_DIRECTORY
 
-NODE_DISPLAY_NAME_MAPPINGS = {"PNGInfo": "🔍 View Image Metadata"}
+NODE_DISPLAY_NAME_MAPPINGS = {"pnginfo": "🔍 Image Metadata (PNGInfo)"}
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
